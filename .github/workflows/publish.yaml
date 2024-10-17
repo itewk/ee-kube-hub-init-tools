@@ -1,0 +1,70 @@
+---
+name: publish
+
+on:
+  schedule:
+  - cron: '0 10 * * *' # everyday at 10am
+  push:
+    branches:
+    - main
+    tags:
+    - 'v*.*.*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITHUB_EVENT_REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  GITHUB_EVENT_NUMBER: ${{ github.event.number }}
+  REGISTRY_URI: ${{ vars.REGISTRY_URI }}
+  REGISTRY_REPOSITORY: ${{ vars.REGISTRY_REPOSITORY }}
+
+jobs:
+  build-and-publish-ee:
+    runs-on: ubuntu-latest
+
+    env:
+      IMAGE_NAME: ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
+    
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+
+    steps:
+    - name: Checkout 🛎️
+      uses: actions/checkout@v4.2.1
+
+    - name: Determine Image Version and Tags ⚙️
+      id: prep
+      run: ${GITHUB_WORKSPACE}/.github/scripts/determine-image-version.sh
+
+    - name: Version 📌
+      run: echo ${{ steps.prep.outputs.version }}
+
+    - name: Image Tags 🏷
+      run: echo ${{ steps.prep.outputs.tags }}
+    
+    - name: Install ansible-builder 🧰
+      run: pip install ansible-builder
+    
+    - name: Build Ansible EE container image 🛠
+      run: |
+        ansible-builder build -v3 \
+        --tag ${{ steps.prep.outputs.tags }}
+
+    - name: Publish images 🔺
+      id: publish-images
+      uses: redhat-actions/push-to-registry@v2.8
+      with:
+        tags: ${{ steps.prep.outputs.tags }}
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+
+    - name: Pushed Image Digest 🔖
+      run: echo ${{ steps.publish-images.outputs.digest }}
+
+    - name: Pushed Image Registry Paths 🔖
+      run: echo ${{ steps.publish-images.outputs.registry-paths }}
