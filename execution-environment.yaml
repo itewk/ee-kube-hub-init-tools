@@ -1,0 +1,33 @@
+---
+version: 3
+
+images:
+  base_image:
+    name: registry.redhat.io/ubi9:latest
+
+dependencies:
+  ansible_core:
+    package_pip: ansible-core
+  ansible_runner:
+    package_pip: ansible-runner
+
+additional_build_steps:
+  append_builder:
+  - ARG HELM_VERSION=release-3.16
+  - ARG KUSTOMIZE_VERSION=release-kustomize-v5.5.0
+  - ARG POLICYGENERRATOR_VERSION=v1.15.0
+  - RUN curl https://raw.githubusercontent.com/helm/helm/${HELM_VERSION}/scripts/get-helm-3 | bash
+  - RUN curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/${KUSTOMIZE_VERSION}/hack/install_kustomize.sh" | bash
+  - RUN curl -L -o PolicyGenerator https://github.com/open-cluster-management-io/policy-generator-plugin/releases/download/${POLICYGENERRATOR_VERSION}/linux-amd64-PolicyGenerator && chmod +x PolicyGenerator
+
+  append_final:
+  - COPY --from=builder /usr/local/bin/helm /usr/local/bin/helm
+  - COPY --from=builder /build/kustomize /usr/local/bin
+  - COPY --from=builder /build/PolicyGenerator /kustomize-plugins/policy.open-cluster-management.io/v1/policygenerator/
+  - ENV KUSTOMIZE_PLUGIN_HOME=/kustomize-plugins
+  - RUN kustomize version
+  - RUN helm version
+
+options:
+  tags:
+  - ee-kustomzie-with-ocm-policygenerator-plugin-and-helm:latest
