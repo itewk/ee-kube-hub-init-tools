@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_PATH: ${{ vars.REGISTRY_URI }}/${{ vars.REGISTRY_REPOSITORY }}/ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
+  IMAGE_PATH: ${{ vars.REGISTRY_URI }}/${{ vars.REGISTRY_REPOSITORY }}/ee-kube-hub-init-tools
   REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
