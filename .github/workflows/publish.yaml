@@ -8,9 +8,10 @@ on:
     branches:
     - main
     tags:
-    - 'v*.*.*'
+    - 'v*'
   pull_request:
-    branches: [ main ]
+    branches:
+    - main
   workflow_dispatch:
 
 concurrency:
@@ -18,50 +19,128 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GITHUB_EVENT_REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-  GITHUB_EVENT_NUMBER: ${{ github.event.number }}
-  REGISTRY_URI: ${{ vars.REGISTRY_URI }}
-  REGISTRY_REPOSITORY: ${{ vars.REGISTRY_REPOSITORY }}
+  IMAGE_PATH: ${{ vars.REGISTRY_URI }}/${{ vars.REGISTRY_REPOSITORY }}/ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
+  REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
+# Modified from: https://github.com/redhat-actions/buildah-build/issues/121#issuecomment-1683691170
 jobs:
-  build-and-publish-ee:
+  build-ee:
+    name: Build EE
     runs-on: ubuntu-latest
-
-    env:
-      IMAGE_NAME: ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
-    
-    outputs:
-      version: ${{ steps.prep.outputs.version }}
-
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+        - linux/amd64
+        - linux/arm64
     steps:
     - name: Checkout 🛎️
-      uses: actions/checkout@v4.2.1
+      uses: actions/checkout@v4
 
-    - name: Determine Image Version and Tags ⚙️
-      id: prep
-      run: ${GITHUB_WORKSPACE}/.github/scripts/determine-image-version.sh
-
-    - name: Version 📌
-      run: echo ${{ steps.prep.outputs.version }}
-
-    - name: Image Tags 🏷
-      run: echo ${{ steps.prep.outputs.tags }}
-    
     - name: Install ansible-builder 🧰
       run: pip install ansible-builder
     
-    - name: Build Ansible EE container image 🛠
-      run: |
-        ansible-builder build -v3 \
-        --tag ${{ steps.prep.outputs.tags }}
+    - name: Crate Ansible EE container image context 🛠
+      run: ansible-builder create -v3 
 
-    - name: Publish images 🔺
-      id: publish-images
-      uses: redhat-actions/push-to-registry@v2.8
+    - name: cache podman storage 🗃
+      uses: actions/cache@v3
       with:
-        tags: ${{ steps.prep.outputs.tags }}
-        username: ${{ secrets.REGISTRY_USERNAME }}
-        password: ${{ secrets.REGISTRY_PASSWORD }}
+        path: ~/.local/share/containers/storage
+        key: podman-storage-${{ matrix.platform }}    
+
+    - name: Extract architecture name from platform name 🔎
+      run: |
+        echo "PODMAN_ARCH=${PLATFORM#*/}" >>${GITHUB_ENV}
+      env:
+        PLATFORM: ${{ matrix.platform }}
+
+    - name: Create container image build meta ℹ️
+      id: build-meta
+      uses: docker/metadata-action@v4
+      with:
+        images: |
+          ${{ env.IMAGE_PATH }}
+        tags: |
+          type=raw,value=build
+        flavor: |
+          suffix=-${{ env.PODMAN_ARCH }}
+
+    - name: Set up QEMU 🧰
+      uses: docker/setup-qemu-action@v3
+
+    - name: Build OCI Image 🛠️
+      id: build-image
+      uses: redhat-actions/buildah-build@v2
+      with:
+        tags: ${{ steps.build-meta.outputs.tags }}
+        labels: ${{ steps.build-meta.outputs.labels }}
+        oci: true
+        context: ./context
+        containerfiles: |
+          ./context/Containerfile
+        platforms: ${{ matrix.platform }}
+
+    - name: Export OCI archives 💾
+      run: skopeo copy containers-storage:${{ env.IMAGE_PATH }}:build-${{ env.PODMAN_ARCH }} oci-archive:/tmp/${{ env.PODMAN_ARCH }}-oci.tar
+
+    - name: Upload OCI archives 🔺
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ env.PODMAN_ARCH }}
+        path: /tmp/${{ env.PODMAN_ARCH }}-oci.tar
+        if-no-files-found: error
+        retention-days: 1
+
+  publish-ee:
+    name: Publish EE
+    runs-on: ubuntu-latest
+    needs: build-ee
+    steps:
+    - name: Download OCI archives 🔻
+      uses: actions/download-artifact@v4
+      with:
+        pattern: build-*
+        path: oci-archives
+        merge-multiple: true
+
+    - name: Create manifest 📒
+      run: podman manifest create ${{ env.IMAGE_PATH }}:manifest
+    
+    - name: Add platform specific images to manifest ➕
+      run: |
+        for OCI_TAR in oci-archives/*-oci.tar; do
+          podman manifest add ${{ env.IMAGE_PATH }}:manifest oci-archive:${OCI_TAR}
+        done
+
+    - name: Create container image build meta ℹ️
+      id: push-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: |
+          ${{ env.IMAGE_PATH }}
+        tags: |
+          type=schedule,pattern=nightly
+          type=edge,branch=main
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
+
+    - name: Tag multi platform manifest 🏷
+      run: |
+        podman tag ${{ env.IMAGE_PATH }}:manifest $(echo "${{ steps.push-meta.outputs.tags }}" | tr '\n' ' ')
+    
+    - name: Publish images 📰
+      id: publish-images
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        tags: ${{ steps.push-meta.outputs.tags }}
+        username: ${{ env.REGISTRY_USERNAME }}
+        password: ${{ env.REGISTRY_PASSWORD }}
 
     - name: Pushed Image Digest 🔖
       run: echo ${{ steps.publish-images.outputs.digest }}
