@@ -1,4 +1,4 @@
-# ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
+# Ansible Execution Environment with Kustomize, OCM PolicyGenerator plugin, and Helm
 
 An [Ansible Execution Environment](https://docs.ansible.com/ansible/latest/getting_started_ee/index.html) with:
 * [kustomize](https://github.com/kubernetes-sigs/kustomize)
