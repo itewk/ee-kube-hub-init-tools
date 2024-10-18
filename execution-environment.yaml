@@ -24,6 +24,7 @@ additional_build_steps:
   - COPY --from=builder /usr/local/bin/helm /usr/local/bin/helm
   - COPY --from=builder /build/kustomize /usr/local/bin
   - COPY --from=builder /build/PolicyGenerator /kustomize-plugins/policy.open-cluster-management.io/v1/policygenerator/
+  - RUN dnf update -y && dnf clean all
   - ENV KUSTOMIZE_PLUGIN_HOME=/kustomize-plugins
   - RUN kustomize version
   - RUN helm version
