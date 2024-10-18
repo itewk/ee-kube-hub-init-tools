@@ -10,6 +10,10 @@ dependencies:
     package_pip: ansible-core
   ansible_runner:
     package_pip: ansible-runner
+  galaxy: requirements.yaml
+  exclude:
+    system:
+    - openshift-clients
 
 additional_build_steps:
   append_builder:
