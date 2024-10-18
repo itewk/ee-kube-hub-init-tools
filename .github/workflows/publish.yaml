@@ -8,9 +8,10 @@ on:
     branches:
     - main
     tags:
-    - 'v*.*.*'
+    - 'v*'
   pull_request:
-    branches: [ main ]
+    branches:
+    - main
   workflow_dispatch:
 
 concurrency:
@@ -18,50 +19,70 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GITHUB_EVENT_REPOSITORY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-  GITHUB_EVENT_NUMBER: ${{ github.event.number }}
   REGISTRY_URI: ${{ vars.REGISTRY_URI }}
   REGISTRY_REPOSITORY: ${{ vars.REGISTRY_REPOSITORY }}
+  IMAGE_NAME: ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
+  REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   build-and-publish-ee:
     runs-on: ubuntu-latest
-
-    env:
-      IMAGE_NAME: ee-kustomzie-with-ocm-policygenerator-plugin-and-helm
-    
-    outputs:
-      version: ${{ steps.prep.outputs.version }}
+    strategy:
+      fail-fast: false
 
     steps:
     - name: Checkout 🛎️
-      uses: actions/checkout@v4.2.1
+      uses: actions/checkout@v4
 
-    - name: Determine Image Version and Tags ⚙️
-      id: prep
-      run: ${GITHUB_WORKSPACE}/.github/scripts/determine-image-version.sh
-
-    - name: Version 📌
-      run: echo ${{ steps.prep.outputs.version }}
+    - name: Create container image build meta ℹ️
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY_URI }}/${{ env.REGISTRY_REPOSITORY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=schedule,pattern=nightly
+          type=edge,branch=main
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha
 
     - name: Image Tags 🏷
-      run: echo ${{ steps.prep.outputs.tags }}
+      run: echo "${{ steps.meta.outputs.tags }}"
+    
+    - name: Image Labels 🏷
+      run: echo "${{ steps.meta.outputs.labels }}"
     
     - name: Install ansible-builder 🧰
       run: pip install ansible-builder
     
-    - name: Build Ansible EE container image 🛠
-      run: |
-        ansible-builder build -v3 \
-        --tag ${{ steps.prep.outputs.tags }}
+    - name: Crate Ansible EE container image context 🛠
+      run: ansible-builder create -v3 
 
-    - name: Publish images 🔺
-      id: publish-images
-      uses: redhat-actions/push-to-registry@v2.8
+    - name: Set up QEMU 🧰
+      uses: docker/setup-qemu-action@v3
+
+    - name: Build Ansible EE container images 🛠
+      uses: redhat-actions/buildah-build@v2
       with:
-        tags: ${{ steps.prep.outputs.tags }}
-        username: ${{ secrets.REGISTRY_USERNAME }}
-        password: ${{ secrets.REGISTRY_PASSWORD }}
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        context: ./context
+        containerfiles: |
+          ./context/Containerfile
+        platforms: ${{ env.PLATFORMS }}
+
+    - name: Publish images 📰
+      id: publish-images
+      uses: redhat-actions/push-to-registry@v2
+      with:
+        tags: ${{ steps.meta.outputs.tags }}
+        username: ${{ env.REGISTRY_USERNAME }}
+        password: ${{ env.REGISTRY_PASSWORD }}
 
     - name: Pushed Image Digest 🔖
       run: echo ${{ steps.publish-images.outputs.digest }}
