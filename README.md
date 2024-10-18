@@ -12,5 +12,5 @@ ansible-builder build -v3
 
 ## Using
 ```bash
-ansible-navigator --eei ee-kustomzie-with-ocm-policygenerator-plugin-and-helm:latest run MY-PLAYBOOK.yaml
+ansible-navigator --eei quay.io/itewk/ee-kustomzie-with-ocm-policygenerator-plugin-and-helm:1 run MY-PLAYBOOK.yaml
 ```
